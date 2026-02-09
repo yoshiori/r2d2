@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
 
 require "r2d2"
+require "dotenv/load"
 
 R2d2.start(ARGV)

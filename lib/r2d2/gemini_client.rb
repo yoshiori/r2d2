@@ -67,6 +67,11 @@ class GeminiClient
 
     response["candidates"].each do |candidate|
       parts = candidate.dig("content", "parts")
+      unless parts
+        reason = candidate["finishReason"]
+        yield "Response blocked (#{reason})" if reason != "STOP"
+        next
+      end
       @history << { role: "model", parts: parts }
       process_parts(parts, &block)
     end
