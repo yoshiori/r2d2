@@ -46,7 +46,7 @@ class GeminiClient
     @function_declarations = {
       function_declarations: TOOLS.map(&:definition)
     }
-    @logger = Logger.new($stderr, level: ENV["R2D2_DEBUG"] ? Logger::DEBUG : Logger::FATAL)
+    @logger = Logger.new($stderr, level: ENV["R2D2_DEBUG"] ? Logger::DEBUG : Logger::INFO)
   end
 
   def chat(text, &block)
@@ -65,7 +65,13 @@ class GeminiClient
 
     @logger.debug { JSON.pretty_generate(response) }
 
-    response["candidates"].each do |candidate|
+    candidates = response["candidates"]
+    unless candidates
+      @logger.error { "API error: No response received. Full response: #{response.inspect}" }
+      yield "API error: No response received. "
+      return
+    end
+    candidates.each do |candidate|
       parts = candidate.dig("content", "parts")
       unless parts
         reason = candidate["finishReason"]
