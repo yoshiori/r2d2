@@ -2,6 +2,7 @@
 
 require "gemini-ai"
 require "rainbow"
+require "reline"
 
 require_relative "r2d2/version"
 require_relative "r2d2/gemini_client"
@@ -16,9 +17,9 @@ module R2d2
     client = GeminiClient.new(ENV["GEMINI_API_KEY"])
     puts Rainbow("R2D2 is starting...").bright.cyan
     loop do
-      print Rainbow("\n❯ ").bright.cyan
-      input = gets.chomp
-      break if input.downcase == "exit"
+      puts ""
+      input = Reline.readline(Rainbow("❯ ").bright.cyan.to_s, true)
+      break if input.nil? || input.downcase == "exit"
 
       client.chat(input) do |message|
         R2d2.print_response(message)
