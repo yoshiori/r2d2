@@ -7,7 +7,6 @@ require_relative "tools/write_file"
 require_relative "tools/exec_command"
 
 class GeminiClient
-  # https://gist.github.com/iinm/892b10427ca71bbd9f83707b9b95c181#file-agent-mjs-L20-L32
   PROMPT = "
   You are an interactive CLI agent specializing in software engineering tasks.
 
@@ -58,6 +57,9 @@ class GeminiClient
   - File paths are relative to the current working directory.
   ".strip
 
+  TOKEN_LIMIT = 100_000
+  RECENT_KEEP_COUNT = 10
+
   TOOLS = [
     ReadFile,
     WriteFile,
@@ -87,8 +89,9 @@ class GeminiClient
                                          tools: @function_declarations,
                                          system_instruction: { parts: { text: PROMPT } }
                                        })
-
     @logger.debug { JSON.pretty_generate(response) }
+    prompt_tokens = response.dig("usageMetadata", "promptTokenCount") || 0
+    compress_history! if prompt_tokens > TOKEN_LIMIT
 
     candidates = response["candidates"]
     unless candidates
@@ -138,6 +141,53 @@ class GeminiClient
     end
     @logger.debug { "Tool result: #{result}" }
     { functionResponse: { name: name, response: { result: result } } }
+  end
+
+  SUMMARIZE_PROMPT = <<~PROMPT
+    Below is a conversation history between an AI assistant and a user.
+    Please summarize this conversation concisely.
+
+    Include:
+    - What the user requested
+    - What actions were taken (file paths, commands executed, etc.)
+    - What the results were
+    - Current state of the work
+
+    Exclude:
+    - Full file contents (paths are sufficient)
+    - Full command output (just the key results)
+  PROMPT
+
+  def compress_history!
+    split_at = find_safe_split_index
+    return if split_at <= 0
+
+    old_history = @history[0...split_at]
+    recent_history = @history[split_at..]
+
+    summary_response = gemini.generate_content({
+                                                 contents: old_history + [{ role: "user",
+                                                                            parts: { text: SUMMARIZE_PROMPT } }]
+                                               })
+
+    summary_text = summary_response.dig("candidates", 0, "content", "parts", 0, "text")
+
+    @history = [
+      { role: "user", parts: { text: "Summary of the conversation so far:\n#{summary_text}" } },
+      { role: "model", parts: [{ text: "Understood. Let's continue." }] }
+    ] + recent_history
+
+    puts Rainbow("History compressed: #{old_history.size} messages summarized").faint
+  end
+
+  def find_safe_split_index
+    from = @history.size - RECENT_KEEP_COUNT
+
+    index = @history[0...from].rindex do |msg|
+      msg[:role] == "model" && msg[:parts].none? { |p| p["functionCall"] }
+    end
+
+    index ? index + 1 : 0
   end
 
   def gemini
