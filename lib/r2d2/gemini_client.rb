@@ -1,6 +1,7 @@
-require "gemini-ai"
+require "openai"
 require "rainbow"
 require "logger"
+require "json"
 
 require_relative "tools/read_file"
 require_relative "tools/write_file"
@@ -70,69 +71,58 @@ class GeminiClient
     @api_key = api_key
     @history = []
     @tools = TOOLS.to_h { |tool| [tool.name, tool.new] }
-    @function_declarations = {
-      function_declarations: TOOLS.map(&:definition)
-    }
+    @tool_definitions = TOOLS.map(&:definition)
     @logger = Logger.new($stderr, level: ENV["R2D2_DEBUG"] ? Logger::DEBUG : Logger::INFO)
   end
 
   def chat(text, &block)
-    @history << { role: "user", parts: { text: text } }
+    @history << { "role" => "user", "content" => text }
     generate(&block)
   end
 
   private
 
   def generate(&block)
-    response = gemini.generate_content({
-                                         contents: @history,
-                                         tools: @function_declarations,
-                                         system_instruction: { parts: { text: PROMPT } }
-                                       })
+    response = client.chat(
+      parameters: {
+        model: "gemini-2.0-flash",
+        messages: [{ "role" => "system", "content" => PROMPT }] + @history,
+        tools: @tool_definitions
+      }
+    )
     @logger.debug { JSON.pretty_generate(response) }
-    prompt_tokens = response.dig("usageMetadata", "promptTokenCount") || 0
+
+    prompt_tokens = response.dig("usage", "prompt_tokens") || 0
     compress_history! if prompt_tokens > TOKEN_LIMIT
 
-    candidates = response["candidates"]
-    unless candidates
+    message = response.dig("choices", 0, "message")
+    unless message
       @logger.error { "API error: No response received. Full response: #{response.inspect}" }
-      yield "API error: No response received. "
+      yield "API error: No response received."
       return
     end
-    candidates.each do |candidate|
-      parts = candidate.dig("content", "parts")
-      unless parts
-        reason = candidate["finishReason"]
-        yield "Response blocked (#{reason})" if reason != "STOP"
-        next
-      end
-      @history << { role: "model", parts: parts }
-      process_parts(parts, &block)
-    end
+
+    @history << message
+    process_message(message, &block)
   rescue Faraday::TooManyRequestsError
     puts Rainbow("[Rate limit hit, retrying in 5s...]").faint
     sleep 5
     retry
   end
 
-  def process_parts(parts, &block)
-    function_response = []
-    parts.each do |part|
-      if part["functionCall"]
-        function_response << execute_function(part["functionCall"])
-      else
-        yield part["text"]
-      end
+  def process_message(message, &block)
+    if message["tool_calls"]
+      tool_results = message["tool_calls"].map { |tool_call| execute_function(tool_call) }
+      @history.concat(tool_results)
+      generate(&block)
+    elsif message["content"]
+      yield message["content"]
     end
-    return if function_response.empty?
-
-    @history << { role: "user", parts: function_response }
-    generate(&block)
   end
 
-  def execute_function(function_call)
-    name = function_call["name"]
-    args = function_call["args"]
+  def execute_function(tool_call)
+    name = tool_call.dig("function", "name")
+    args = JSON.parse(tool_call.dig("function", "arguments"))
     puts Rainbow("[#{name}] #{args}").faint
     begin
       result = @tools[name].execute(**args.transform_keys(&:to_sym))
@@ -140,7 +130,7 @@ class GeminiClient
       result = "Error: #{e.message}"
     end
     @logger.debug { "Tool result: #{result}" }
-    { functionResponse: { name: name, response: { result: result } } }
+    { "role" => "tool", "tool_call_id" => tool_call["id"], "content" => result.to_s }
   end
 
   SUMMARIZE_PROMPT = <<~PROMPT
@@ -165,16 +155,20 @@ class GeminiClient
     old_history = @history[0...split_at]
     recent_history = @history[split_at..]
 
-    summary_response = gemini.generate_content({
-                                                 contents: old_history + [{ role: "user",
-                                                                            parts: { text: SUMMARIZE_PROMPT } }]
-                                               })
+    summary_response = client.chat(
+      parameters: {
+        model: "gemini-2.0-flash",
+        messages: [{ "role" => "system", "content" => PROMPT }] +
+                  old_history +
+                  [{ "role" => "user", "content" => SUMMARIZE_PROMPT }]
+      }
+    )
 
-    summary_text = summary_response.dig("candidates", 0, "content", "parts", 0, "text")
+    summary_text = summary_response.dig("choices", 0, "message", "content")
 
     @history = [
-      { role: "user", parts: { text: "Summary of the conversation so far:\n#{summary_text}" } },
-      { role: "model", parts: [{ text: "Understood. Let's continue." }] }
+      { "role" => "user", "content" => "Summary of the conversation so far:\n#{summary_text}" },
+      { "role" => "assistant", "content" => "Understood. Let's continue." }
     ] + recent_history
 
     puts Rainbow("History compressed: #{old_history.size} messages summarized").faint
@@ -184,20 +178,16 @@ class GeminiClient
     from = @history.size - RECENT_KEEP_COUNT
 
     index = @history[0...from].rindex do |msg|
-      msg[:role] == "model" && msg[:parts].none? { |p| p["functionCall"] }
+      msg["role"] == "assistant" && !msg["tool_calls"]
     end
 
     index ? index + 1 : 0
   end
 
-  def gemini
-    @gemini ||= Gemini.new(
-      credentials: {
-        service: "generative-language-api",
-        api_key: @api_key,
-        version: "v1beta"
-      },
-      options: { model: "gemini-2.0-flash" }
+  def client
+    @client ||= OpenAI::Client.new(
+      access_token: @api_key,
+      uri_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
     )
   end
 end

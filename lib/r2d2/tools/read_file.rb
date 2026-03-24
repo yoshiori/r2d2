@@ -23,7 +23,7 @@ class ReadFile
   end
 
   def self.definition
-    { name: name, description: description, parameters: parameters }
+    { type: "function", function: { name: name, description: description, parameters: parameters } }
   end
 
   def execute(path:)
