@@ -84,14 +84,35 @@ class LlmClient
 
   private
 
+  SPINNER_CHARS = %w[⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏].freeze
+
+  def with_spinner
+    stop = false
+    spinner = Thread.new do
+      i = 0
+      until stop
+        print "\r#{Rainbow(SPINNER_CHARS[i % SPINNER_CHARS.size]).cyan} thinking..."
+        i += 1
+        sleep 0.1
+      end
+      print "\r\e[2K"
+    end
+    result = yield
+    stop = true
+    spinner.join
+    result
+  end
+
   def generate(&block)
-    response = client.chat(
-      parameters: {
-        model: @model,
-        messages: [{ "role" => "system", "content" => PROMPT }] + @history,
-        tools: @tool_definitions
-      }
-    )
+    response = with_spinner do
+      client.chat(
+        parameters: {
+          model: @model,
+          messages: [{ "role" => "system", "content" => PROMPT }] + @history,
+          tools: @tool_definitions
+        }
+      )
+    end
     @logger.debug { JSON.pretty_generate(response) }
 
     prompt_tokens = response.dig("usage", "prompt_tokens") || 0
@@ -157,14 +178,16 @@ class LlmClient
     old_history = @history[0...split_at]
     recent_history = @history[split_at..]
 
-    summary_response = client.chat(
-      parameters: {
-        model: @model,
-        messages: [{ "role" => "system", "content" => PROMPT }] +
-                  old_history +
-                  [{ "role" => "user", "content" => SUMMARIZE_PROMPT }]
-      }
-    )
+    summary_response = with_spinner do
+      client.chat(
+        parameters: {
+          model: @model,
+          messages: [{ "role" => "system", "content" => PROMPT }] +
+                    old_history +
+                    [{ "role" => "user", "content" => SUMMARIZE_PROMPT }]
+        }
+      )
+    end
 
     summary_text = summary_response.dig("choices", 0, "message", "content")
 
