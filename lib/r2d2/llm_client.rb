@@ -7,7 +7,7 @@ require_relative "tools/read_file"
 require_relative "tools/write_file"
 require_relative "tools/exec_command"
 
-class GeminiClient
+class LlmClient
   PROMPT = "
   You are an interactive CLI agent specializing in software engineering tasks.
 

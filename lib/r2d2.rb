@@ -1,11 +1,10 @@
 # frozen_string_literal: true
 
-require "gemini-ai"
 require "rainbow"
 require "reline"
 
 require_relative "r2d2/version"
-require_relative "r2d2/gemini_client"
+require_relative "r2d2/llm_client"
 
 module R2d2
   class Error < StandardError; end
@@ -14,7 +13,7 @@ module R2d2
   INDENT = "  " # Since it contains control characters, PREFIX.length is not used.
 
   def self.start(_args)
-    client = GeminiClient.new(ENV["GEMINI_API_KEY"])
+    client = LlmClient.new(ENV["GEMINI_API_KEY"])
     puts Rainbow("R2D2 is starting...").bright.cyan
     loop do
       puts ""
