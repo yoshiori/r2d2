@@ -58,6 +58,7 @@ class LlmClient
   - File paths are relative to the current working directory.
   ".strip
 
+  MODEL = "gemini-2.0-flash"
   TOKEN_LIMIT = 100_000
   RECENT_KEEP_COUNT = 10
 
@@ -85,7 +86,7 @@ class LlmClient
   def generate(&block)
     response = client.chat(
       parameters: {
-        model: "gemini-2.0-flash",
+        model: MODEL,
         messages: [{ "role" => "system", "content" => PROMPT }] + @history,
         tools: @tool_definitions
       }
@@ -157,7 +158,7 @@ class LlmClient
 
     summary_response = client.chat(
       parameters: {
-        model: "gemini-2.0-flash",
+        model: MODEL,
         messages: [{ "role" => "system", "content" => PROMPT }] +
                   old_history +
                   [{ "role" => "user", "content" => SUMMARIZE_PROMPT }]
@@ -165,6 +166,11 @@ class LlmClient
     )
 
     summary_text = summary_response.dig("choices", 0, "message", "content")
+
+    if summary_text.nil? || summary_text.empty?
+      @logger.warn("History compression failed: summary was empty. Will retry on next turn.")
+      return
+    end
 
     @history = [
       { "role" => "user", "content" => "Summary of the conversation so far:\n#{summary_text}" },

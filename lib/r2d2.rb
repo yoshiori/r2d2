@@ -13,7 +13,7 @@ module R2d2
   INDENT = "  " # Since it contains control characters, PREFIX.length is not used.
 
   def self.start(_args)
-    client = LlmClient.new(ENV["GEMINI_API_KEY"])
+    client = LlmClient.new(ENV["LLM_API_KEY"])
     puts Rainbow("R2D2 is starting...").bright.cyan
     loop do
       puts ""
