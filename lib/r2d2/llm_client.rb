@@ -58,7 +58,6 @@ class LlmClient
   - File paths are relative to the current working directory.
   ".strip
 
-  MODEL = "gemini-2.0-flash"
   TOKEN_LIMIT = 100_000
   RECENT_KEEP_COUNT = 10
 
@@ -68,8 +67,10 @@ class LlmClient
     ExecCommand
   ].freeze
 
-  def initialize(api_key)
+  def initialize(api_key, uri_base, model)
     @api_key = api_key
+    @model = model
+    @uri_base = uri_base
     @history = []
     @tools = TOOLS.to_h { |tool| [tool.name, tool.new] }
     @tool_definitions = TOOLS.map(&:definition)
@@ -86,7 +87,7 @@ class LlmClient
   def generate(&block)
     response = client.chat(
       parameters: {
-        model: MODEL,
+        model: @model,
         messages: [{ "role" => "system", "content" => PROMPT }] + @history,
         tools: @tool_definitions
       }
@@ -158,7 +159,7 @@ class LlmClient
 
     summary_response = client.chat(
       parameters: {
-        model: MODEL,
+        model: @model,
         messages: [{ "role" => "system", "content" => PROMPT }] +
                   old_history +
                   [{ "role" => "user", "content" => SUMMARIZE_PROMPT }]
@@ -193,7 +194,7 @@ class LlmClient
   def client
     @client ||= OpenAI::Client.new(
       access_token: @api_key,
-      uri_base: "https://generativelanguage.googleapis.com/v1beta/openai/"
+      uri_base: @uri_base
     )
   end
 end

@@ -13,8 +13,8 @@ module R2d2
   INDENT = "  " # Since it contains control characters, PREFIX.length is not used.
 
   def self.start(_args)
-    client = LlmClient.new(ENV["LLM_API_KEY"])
-    puts Rainbow("R2D2 is starting...").bright.cyan
+    client = LlmClient.new(ENV["LLM_API_KEY"], ENV["LLM_API_BASE"], ENV["LLM_MODEL"])
+    puts Rainbow("R2D2 is starting... (model: #{ENV["LLM_MODEL"]})").bright.cyan
     loop do
       puts ""
       input = Reline.readline(Rainbow("❯ ").bright.cyan.to_s, true)
